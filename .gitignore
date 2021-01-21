@@ -22,7 +22,7 @@ node_modules
 .sass-cache
 
 # Data Folder
-data
+/data/*
 
 # Jupiter Notebook Checkpoints
 notebooks/.ipynb_checkpoints/
