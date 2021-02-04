@@ -43,7 +43,7 @@ def replace_INDEX_with_QTY(label):
 def remove_QTY_symbol(text):
     """Remove the '$' symbol from ingredient quantities"""
     if "$" in text: # if faster when there is not a "$", slower when there is
-        return text.replace("$", '') 
+        return text.replace("$", ' ') 
     return text
 
 def remove_parenthesis(df):
