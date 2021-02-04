@@ -85,7 +85,7 @@ def run_data_cleaning(df):
 		remove_IDs.append(find_hyphen_texts(text, label, ID))
 		cleaned_data.append([text,label,ID])
 	cleaned_df = pd.DataFrame(
-		cleaned_data, columns=['text', 'labels', 'ID']
+		cleaned_data, columns=['text', 'label', 'ID']
 	)
 	return cleaned_df[~cleaned_df['ID'].isin(remove_IDs)]
 
