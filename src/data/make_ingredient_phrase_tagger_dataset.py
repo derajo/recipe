@@ -48,37 +48,50 @@ def remove_qty_symbol(df):
 def parenthesis_correcting(input_df):
     """Turns parenthesis into COMMENT"""
     df = input_df.copy()
-
+    
     # remove instances where there are imbalanced parenthesis
     open_p = df.loc[(df.text.str.match('^\($'))].groupby("ID").count()[['text']].rename(columns = {"text":"("}).reset_index(drop = False)
     closed_p = df.loc[(df.text.str.match('^\)$'))].groupby("ID").count()[['text']].rename(columns = {"text":")"}).reset_index(drop = False)
     matches = open_p.merge(closed_p, on = "ID", how = "outer")
     remove_ids = list(matches[matches["("]!=matches[")"]]['ID'])
     df = df.loc[~df.ID.isin(remove_ids)]
-
-    opened = df.loc[df.text.str.match('^\($')].index
-    closed = df.loc[df.text.str.match('^\)$')].index
-    parenthesis_groups = zip(opened,closed)
+    
+    opened = iter(df.loc[df.text.str.match('^\($')].index)
+    closed = iter(df.loc[df.text.str.match('^\)$')].index)
+    id_iter = iter(df.drop_duplicates("ID").index)  # indexes for when new ingredient starts
     # intialize
-    p = next(parenthesis_groups)
+    o = next(opened)
+    c = next(closed)
+    id_ = next(id_iter)
+    
+    # logic to comment out words in parenthesis
     arr = []
     for i in range(len(df)):
-        if i > p[1]:
-            p = next(parenthesis_groups, (0,0))
-        if (i >= p[0]) & (i <= p[1]):
-            arr.append(True)
-        else:
-            arr.append(False)
+        while c < o:
+            c = next(closed)
+        if i == id_:
+            id_ = next(id_iter)
+            var = False
+        if var:
+            if i > c:
+                arr.append(False)
+                c = next(closed)
+            else:
+                arr.append(True)
+            continue
+        if i < o:
+            var = False
+            arr.append(var)
+            continue
+        if (i == o) | (i == c):
+            var = True
+            if i == o:
+                o = next(opened)
+        arr.append(var)
     # make parenthesis comments
     # if removing parenthsis, switch True and False then filter out.
     df.loc[arr,"label"] = "COMMENT"
     return df
-
-def ingredient_has_name(df):
-    """
-    Ensure the ingredient has a name within the text
-    """
-    return any(df.label.str.match('^NAME$'))
 
 def remove_hyphen_ingredients(df):
     """Find and rmeove units and qtys with hyphens in them.
