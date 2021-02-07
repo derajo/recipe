@@ -48,6 +48,14 @@ def remove_qty_symbol(df):
 def parenthesis_correcting(input_df):
     """Turns parenthesis into COMMENT"""
     df = input_df.copy()
+
+    # remove instances where there are imbalanced parenthesis
+    open_p = df.loc[(df.text.str.match('^\($'))].groupby("ID").count()[['text']].rename(columns = {"text":"("}).reset_index(drop = False)
+    closed_p = df.loc[(df.text.str.match('^\)$'))].groupby("ID").count()[['text']].rename(columns = {"text":")"}).reset_index(drop = False)
+    matches = open_p.merge(closed_p, on = "ID", how = "outer")
+    remove_ids = list(matches[matches["("]!=matches[")"]]['ID'])
+    df = df.loc[~df.ID.isin(remove_ids)]
+
     opened = df.loc[df.text.str.match('^\($')].index
     closed = df.loc[df.text.str.match('^\)$')].index
     parenthesis_groups = zip(opened,closed)
@@ -169,5 +177,6 @@ cleaned_df = run_data_cleaning(
     remove_hyphen_ingredients,
     or_to_comment,
 )
+print(len(cleaned_df))
 print(f"Writing cleaned dataset to {clean_data_out_file_path}")
 cleaned_df.to_csv(clean_data_out_file_path, index=False)
