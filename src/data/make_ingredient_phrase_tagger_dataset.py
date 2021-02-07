@@ -29,6 +29,11 @@ def add_id_to_dataset(input_df):
     df.loc[new_ingredient_loc, "ID"] = list(map(generate_id, range(1,ingredient_count+1)))
     return df.fillna(method = 'ffill')
 
+def remove_urls(df):
+    """remove urls from training data"""
+    df = df.loc[~df['text'].str.contains('http')].reset_index(drop = True)
+    return df
+
 def remove_label_prefix(df):
     """Remove the prefix in labels such as 'B-'
     and 'I-'"""
@@ -183,6 +188,7 @@ df.to_csv(out_file_path, index=False)
 
 cleaned_df = run_data_cleaning(
     df, 
+    remove_urls,
     remove_label_prefix,
     replace_index_with_qty,
     remove_qty_symbol,
