@@ -1,10 +1,27 @@
 import hashlib
 import pandas as pd
+import numpy as np
 from functools import reduce
 
 in_file_path = "../data/raw/train_file.csv"
 out_file_path = "../data/raw/ingredient_phrase_tagger_training_data.csv"
-clean_data_out_file_path = "../data/interim/ingredient_phrase_tagger_training_data_cleaned_v2.csv"
+clean_data_out_file_path = "../data/interim/ingredient_phrase_tagger_training_data_cleaned_v3.csv"
+
+replacement_dict = {
+            "tsp": "teaspoon",
+            "tsp.": "teaspoon",
+            "oz": "ounce",
+            "oz.": "ounce",
+            "tbsp": "tablespoon",
+            "tbsp.": "tablespoon",
+            "lb": "pound",
+            "lb.": "pound",
+            "ml": "milliliter",
+            "ml.": "milliliter",
+            "g" : "grams",
+            "g." : "grams",
+        }
+
 
 def column_names():
 	print("Renaming columns...")
@@ -31,27 +48,32 @@ def add_id_to_dataset(input_df):
 
 def remove_urls(df):
     """remove urls from training data"""
+    print("Removing urls from data")
     df = df.loc[~df['text'].str.contains('http')].reset_index(drop = True)
     return df
 
 def remove_label_prefix(df):
     """Remove the prefix in labels such as 'B-'
     and 'I-'"""
+    print("Removing label prefixes")
     df.loc[:, 'label'] = df.label.replace('^(.-)', '', regex= True)
     return df
 
 def replace_index_with_qty(df):
     """Remove and replace 'INDEX' label with 'QTY'"""
+    print("Replacing INDEX label with QTY label")
     df.loc[:, 'label'] = df.label.replace('INDEX', 'QTY')
     return df
 
 def remove_qty_symbol(df):
     """Remove the '$' symbol from ingredient quantities"""
+    print("Remove $ from QTY's")
     df.loc[:, 'text'] = df.text.replace('\$', ' ', regex = True)
     return df
 
 def parenthesis_correcting(input_df):
     """Turns parenthesis into COMMENT"""
+    print("Correcting parenthesis label")
     df = input_df.copy()
     
     # remove instances where there are imbalanced parenthesis
@@ -99,10 +121,11 @@ def parenthesis_correcting(input_df):
     return df
 
 def remove_hyphen_ingredients(df):
-    """Find and rmeove units and qtys with hyphens in them.
+    """Find and remove units and qtys with hyphens in them.
     These instances happen in examples like '1-pound'
     and is incorrectly labelled just a qty or just a unit.
     """
+    print("Removing hyphened ingredients")
     d = df.copy()
     hyphen_in = d.text.str.contains("-")
     not_hyphen_only = ~d.text.str.match('^-$')
@@ -127,6 +150,7 @@ def or_to_comment(df):
     come after the first or and replace all text after them
     as a comment.
     """
+    print("Fixing alternative ingredient labels to comments")
     or_ingr = df.copy()
     first_name_ingredients = or_ingr[or_ingr['label'] ==  "NAME"].drop_duplicates("ID")
     ingredient_with_name_id = list(first_name_ingredients.ID)
@@ -167,13 +191,98 @@ def or_to_comment(df):
     or_ingr.loc[arr, "label"] = "COMMENT"
     return or_ingr
 
+def bad_qty_unit_entries(input_df):
+    print("Removing ingredient entries that need labelling")
+    df = input_df.copy()
+    bad_qty_and_unit = df.ID.isin(df[(df.text.str.contains("\d", regex = True))
+                                     & (df.text.str.contains("-"))
+                                     & (df.label == "OTHER")]['ID'].unique())
+    return df.loc[~bad_qty_and_unit]
+    
+def hyphen_replacement(input_df):
+    print("Replace hyphens with spaces")
+    df = input_df.copy()
+    df.loc[:, 'text'] = df.text.replace('-', ' ', regex = True)
+    return df
+
+# Write out some bad data to be labelled later
+def explode(input_df, lst_col="text", fill_value='', preserve_index=False):
+    print("exploding data so one word per line")
+    # make sure `lst_cols` is list-alike
+    df = input_df.copy()
+    df.loc[:, lst_col] = df[lst_col].str.split(" ")
+    if (lst_col is not None
+        and len(lst_col) > 0
+        and not isinstance(lst_col, (list, tuple, np.ndarray, pd.Series))):
+        lst_col = [lst_col]
+    # all columns except `lst_cols`
+    idx_cols = df.columns.difference(lst_col)
+    # calculate lengths of lists
+    lens = df[lst_col[0]].str.len()
+    # preserve original index values    
+    idx = np.repeat(df.index.values, lens)
+    # create "exploded" DF
+    res = (pd.DataFrame({
+                col:np.repeat(df[col].values, lens)
+                for col in idx_cols},
+                index=idx)
+             .assign(**{col:np.concatenate(df.loc[lens>0, col].values)
+                            for col in lst_col}))
+    # append those rows that have empty lists
+    if (lens == 0).any():
+        # at least one list in cells is empty
+        res = (res.append(df.loc[lens==0, idx_cols], sort=False)
+                  .fillna(fill_value))
+    # revert the original index order
+    res = res.sort_index()
+    # reset index if requested
+    if not preserve_index:        
+        res = res.reset_index(drop=True)
+    return res
+
+def fix_other_labels(input_df):
+    """Most times that a period appeared it was labelled as OTHER.
+    Replace those instances with a COMMENT label. Ensure that when
+    the text is just a period to label as OTHER"""
+    print("Fixing OTHER labels")
+    df = input_df.copy()
+    period = df.text.str.contains("\.")
+    other = df.label.str.match("OTHER")
+    just_period = df.text.str.contains("^\.$")
+    df.loc[((period) & (other) & (~just_period)), "label"] = "COMMENT"
+    df.loc[just_period, "label"] = "OTHER"
+    return df
+
+def fix_commented_units(input_df):
+    print("Fix commented UNITs")
+    df = input_df.copy()
+    regex_string = "$|^".join(replacement_dict.keys())
+    regex_string = "^" + regex_string + "$"
+    regex_string = regex_string.replace(".", "\.")
+    df.loc[df.text.str.lower().str.contains(regex_string, regex=True), "label"] = "UNIT"
+    return df
+
+def replace_abbreviated_units(input_df):
+    print("Replace abbreviated units with their full name")
+    df = input_df.copy()
+    def replacement_function(text):
+        lowercase_text = text.lower() 
+        if lowercase_text in replacement_dict:
+              return replacement_dict[lowercase_text]
+        else:
+            return text
+    df.loc[:, "text"] = df.text.apply(replacement_function)
+    return df
+
+
+
 def run_data_cleaning(df, *funcs):
     """
     Cleanses training data of text that increases complexity
     or that will cause issues while creating the model.
     """
     print("Cleaning phrase tagger data...")
-    return reduce(lambda arg, func: func(arg), funcs, df)
+    return reduce(lambda arg, func: func(arg), funcs, df)[['ID', 'text', 'label']]
 
 print("Reading in ingredient_phrase_tagger_training_data...")
 df = pd.read_csv(in_file_path, sep='\t', header=None)
@@ -192,10 +301,15 @@ cleaned_df = run_data_cleaning(
     remove_label_prefix,
     replace_index_with_qty,
     remove_qty_symbol,
-    parenthesis_correcting,
     remove_hyphen_ingredients,
+    bad_qty_unit_entries,
+    hyphen_replacement,
+    explode,
+    fix_other_labels,
+    fix_commented_units,
+    replace_abbreviated_units,
+    parenthesis_correcting,
     or_to_comment,
 )
-print(len(cleaned_df))
 print(f"Writing cleaned dataset to {clean_data_out_file_path}")
 cleaned_df.to_csv(clean_data_out_file_path, index=False)
